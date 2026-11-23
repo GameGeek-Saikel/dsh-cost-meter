@@ -34,6 +34,9 @@
 }
 
 .pill {
+  /* Anchor for the detail panel (see `.panel`); the name is per instance and
+     arrives as an inline custom property from the component. */
+  anchor-name: var(--cost-meter-anchor);
   box-sizing: border-box;
   corner-shape: round;
   max-width: 100%;
@@ -80,7 +83,21 @@
    backdrop filter is what keeps the panel opaque over the chat; the elevation
    stroke/shadow pair and the radius belong to that same surface. */
 
+/* The panel is portaled to the body, where it inherits nothing from the
+   trigger, so the instance's anchor name travels as an inline custom property
+   on both elements. Placement is CSS's job since DSH 0.2.2: the panel hangs
+   8px above the trigger, never above the frame's overlay inset, and its right
+   edge follows the trigger while the left edge stops at the viewport margin. */
 .panel {
+  position: fixed;
+  position-anchor: var(--cost-meter-anchor);
+  top: max(12px, var(--dsh-frame-overlay-top, 12px));
+  bottom: calc(anchor(top) + 8px);
+  left: 12px;
+  right: anchor(right);
+  align-self: safe end;
+  justify-self: safe end;
+  margin: 0;
   z-index: 1100;
   box-sizing: border-box;
   background: var(--dsw-specific-menu);
@@ -97,7 +114,6 @@
   padding: 16px;
   font-size: 12px;
   line-height: 18px;
-  position: fixed;
 }
 
 .title {

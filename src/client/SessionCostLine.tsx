@@ -19,13 +19,13 @@ import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } 
 import { createPortal } from 'react-dom'
 import {
   IconGaugeOutlineRegular,
-  useAnchoredPosition,
   useDismissOnOutsidePointer,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BalanceSnapshot, ConversationCostResponse, SessionCostProjection } from '../types.ts'
+import { useAnchorStyle } from './anchor-name.ts'
 import { costLookupFor } from './cost-math.ts'
 import { currencySymbol, displayCurrency, formatMoney, formatTime } from './format.ts'
 import css from './SessionCostLine.module.css'
@@ -34,13 +34,6 @@ import css from './SessionCostLine.module.css'
 export const ENDPOINT = '/cost-meter'
 /** Balance refresh interval in milliseconds. */
 export const REFRESH_MS = 60_000
-/** Distance between the capsule and its detail panel, in pixels. */
-const PANEL_GAP = 8
-/** Minimum distance the detail panel keeps from the viewport edge, in pixels. */
-const PANEL_MARGIN = 12
-/** Pre-measurement placement: mounted but invisible, so the first frame can size it. */
-const MEASURE_STYLE = { visibility: 'hidden', left: 0, top: 0 } as const
-
 /** Session-cost namespace key domain for the locale seat. */
 export type CostLocale = PropsLocale<'cost-meter'>['t']
 
@@ -108,7 +101,7 @@ export const SessionCostLine = memo(function SessionCostLine({ useProjection, se
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLSpanElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
-  const pos = useAnchoredPosition({ open, anchorRef: rootRef, panelRef, side: 'top', gap: PANEL_GAP, margin: PANEL_MARGIN })
+  const anchorStyle = useAnchorStyle()
   useDismissOnOutsidePointer(rootRef, open, setOpen, panelRef)
   useEffect(() => {
     if (!open) return
@@ -253,6 +246,7 @@ export const SessionCostLine = memo(function SessionCostLine({ useProjection, se
       <button
         type="button"
         className={css.pill}
+        style={anchorStyle}
         data-cost-pill="total"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -269,7 +263,7 @@ export const SessionCostLine = memo(function SessionCostLine({ useProjection, se
           role="dialog"
           aria-label={t('dock.detail.title')}
           data-testid="session-cost-detail"
-          style={pos ?? MEASURE_STYLE}
+          style={anchorStyle}
         >
           <div className={css.title}>
             <span className={css.titleLabel}><IconGaugeOutlineRegular />{t('dock.detail.title')}</span>
