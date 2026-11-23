@@ -6,9 +6,9 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 // The real ui-primitives pulls KaTeX stylesheets Node cannot load; the
-// surfaces only need Tooltip/Button/Tag/Pill/icons and the two anchor hooks to
-// pass through, so stub the module. `Tag` mirrors the shipped
-// `span[data-tone]` capsule; the hooks are inert here (jsdom has no layout).
+// surfaces only need Tooltip/Button/Tag/Pill/icons and outside-pointer
+// dismissal to pass through, so stub the module. `Tag` mirrors the shipped
+// `span[data-tone]` capsule; the hook is inert here (jsdom has no layout).
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => {
   const React = require('react')
   const passthrough = (props: Record<string, unknown>) => React.createElement('span', props)
@@ -21,7 +21,6 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => {
       React.createElement('span', { 'data-tone': props.tone ?? 'outline', className: props.className }, props.children),
     Pill: (props: { className?: string; children?: unknown }) =>
       React.createElement('span', { className: props.className }, props.children),
-    useAnchoredPosition: () => ({ left: 0, top: 0 }),
     useDismissOnOutsidePointer: () => { /* outside clicks are covered by the pill's own tests */ },
     IconGaugeOutlineRegular: passthrough,
     IconDatabaseOutlineRegular: passthrough,
@@ -523,6 +522,35 @@ describe('AssistantCostChip', () => {
     expect(values).toEqual(['¥1.00', '¥0.0200', '¥2.00', '单价', 'deepseek-v4-flash', expect.stringContaining('快照 v1')])
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByTestId('cost-chip-detail')).toBeNull())
+  })
+
+  it('hands one CSS anchor name to its trigger and its portaled panel', async () => {
+    stubFetch(RESPONSE)
+    render(<AssistantCostChip
+      messageId="msg-1"
+      useProjection={projections(PROJECTION)}
+      t={zhT}
+    />)
+    const trigger = screen.getByRole('button', { name: '¥3.02' })
+    const name = trigger.style.getPropertyValue('--cost-meter-anchor')
+    expect(name).toMatch(/^--cost-meter-chip-/)
+    fireEvent.click(trigger)
+    const dialog = await screen.findByTestId('cost-chip-detail')
+    // The panel sits in a body portal, so it carries the name itself instead
+    // of inheriting it from the trigger.
+    expect(dialog.style.getPropertyValue('--cost-meter-anchor')).toBe(name)
+  })
+
+  it('gives every chip instance its own anchor name', () => {
+    stubFetch(RESPONSE)
+    render(<>
+      <AssistantCostChip messageId="msg-1" useProjection={projections(PROJECTION)} t={zhT} />
+      <AssistantCostChip messageId="msg-1" useProjection={projections(PROJECTION)} t={zhT} />
+    </>)
+    const names = screen.getAllByTestId('cost-chip')
+      .map(chip => chip.querySelector('button')?.style.getPropertyValue('--cost-meter-anchor'))
+    expect(names[0]).toMatch(/^--cost-meter-chip-/)
+    expect(names[0]).not.toBe(names[1])
   })
 
   it('renders the dash for an unpriced reply', () => {

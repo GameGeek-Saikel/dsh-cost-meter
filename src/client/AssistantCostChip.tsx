@@ -9,9 +9,10 @@
  * The control is the row's own stat-capsule shape — the same trigger + portaled
  * dialog the shipped 用量 and 用时 capsules use (28px pill, 13px/24px tertiary
  * label, hover fill, an `aria-expanded` dialog anchored above the trigger
- * through `useAnchoredPosition` + `useDismissOnOutsidePointer`). Clicking it
- * opens the reply's anchored breakdown: the three billed categories, the band
- * that priced it, the model, and the snapshot version.
+ * through CSS `anchor-name`/`position-anchor`, dismissed by
+ * `useDismissOnOutsidePointer`). Clicking it opens the reply's anchored
+ * breakdown: the three billed categories, the band that priced it, the model,
+ * and the snapshot version.
  *
  * The price itself is the band-coloured label (green off-peak, red peak,
  * neutral before the rollout), so the row carries the status without a second
@@ -25,12 +26,12 @@ import { memo, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   IconGaugeOutlineRegular,
-  useAnchoredPosition,
   useDismissOnOutsidePointer,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ConversationCostResponse, SessionCostStep } from '../types.ts'
+import { useAnchorStyle } from './anchor-name.ts'
 import { bandForTime, peakOffPeakMultiplier } from './cost-math.ts'
 import { currencySymbol, displayCurrency, formatMoney, formatMultiplier, formatTime } from './format.ts'
 import css from './AssistantCostChip.module.css'
@@ -43,13 +44,6 @@ export interface AssistantCostChipProps {
   useProjection: UseProjection
   t: ChipLocale
 }
-
-/** Distance kept between the trigger and its dialog (the shipped stat panels' own gap). */
-const PANEL_GAP = 8
-/** Distance kept between the dialog and the viewport edges. */
-const PANEL_MARGIN = 12
-/** Pre-measurement placement: mounted but invisible, so the first frame can size it. */
-const MEASURE_STYLE = { visibility: 'hidden', left: 0, top: 0 } as const
 
 /** The projection step for one (turn, step) coordinate, if the ledger has it. */
 export function stepOf(
@@ -78,7 +72,7 @@ export const AssistantCostChip = memo(function AssistantCostChip({ messageId, us
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLSpanElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
-  const pos = useAnchoredPosition({ open, anchorRef: rootRef, panelRef, side: 'top', gap: PANEL_GAP, margin: PANEL_MARGIN })
+  const anchorStyle = useAnchorStyle()
   useDismissOnOutsidePointer(rootRef, open, setOpen, panelRef)
 
   useEffect(() => {
@@ -144,6 +138,7 @@ export const AssistantCostChip = memo(function AssistantCostChip({ messageId, us
       <button
         type="button"
         className={css.trigger}
+        style={anchorStyle}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(prev => !prev)}
@@ -157,7 +152,7 @@ export const AssistantCostChip = memo(function AssistantCostChip({ messageId, us
           className={css.panel}
           role="dialog"
           aria-label={t('chip.detail.title')}
-          style={pos ?? MEASURE_STYLE}
+          style={anchorStyle}
           data-testid="cost-chip-detail"
         >
           <div className={css.title}>

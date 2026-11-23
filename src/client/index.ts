@@ -107,13 +107,15 @@ export function apply(ctx: ClientContext): void {
   )
 
   // Header pill: total / live estimate with the expandable detail.
-  // Negative order keeps it left of the built-in Session log utility.
+  // Utilities render left to right in ascending order. The session-panel toggle
+  // claims -10, so a lower order seats the pill to ITS left, ahead of the
+  // panel toggle, the More menu and the right-sidebar toggle.
   ctx.slots.inject(
     'conversation.session.header.utilities',
     () => ctx.slots.register({
       name: 'conversation.session.header.utilities',
       id: 'cost-meter',
-      order: -10,
+      order: -20,
       locale: NS,
     }, SessionCostPill),
   )
