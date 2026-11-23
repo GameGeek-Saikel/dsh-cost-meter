@@ -4,10 +4,12 @@ name: dist-tags.yml
 # scripts/dist-tag.mjs: every tag is re-pointed at the newest published version
 # whose @deepseek-ai/dsh* peer ranges accept that DSH release line.
 #
-# publish.yml already reconciles after every release, so this workflow is the
-# repair path: run it by hand from the Actions tab, or let the push that lands
-# the policy script trigger it — the paths filter below is what corrects tags
-# written by a release process that predates the policy.
+# publish.yml no longer reconciles: it stages the release, and the version only
+# reaches the registry when a maintainer approves the stage with its dist-tag.
+# So this workflow is the repair path — run it by hand after approving a
+# release, or let the push that lands the policy script trigger it; the paths
+# filter below is what corrects tags written by a release process that
+# predates the policy.
 
 on:
   workflow_dispatch:
