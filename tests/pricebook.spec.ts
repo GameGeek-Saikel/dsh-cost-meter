@@ -370,9 +370,11 @@ describe('PricebookHandle refresh and mutation', () => {
     const web = { searchPerThousand: 5, fetchPerThousand: 5 }
     await handle.refresh({ official: { ...OFFICIAL, web } })
     expect(handle.currentSnapshot()?.web).toEqual(web)
-    // Before 2026-11-01 00:00 Beijing requests are counted but free.
-    expect(handle.webPriceFor(Date.UTC(2026, 9, 30)).billingStarted).toBe(false)
-    expect(handle.webPriceFor(Date.UTC(2026, 10, 2)).billingStarted).toBe(true)
+    // The per-request charge covers 2026-11-01 00:00 to 2026-11-18 12:00 Beijing.
+    expect(handle.webPriceFor(Date.UTC(2026, 9, 30))).toMatchObject({ billingStarted: false, billingEnded: false })
+    expect(handle.webPriceFor(Date.UTC(2026, 10, 2))).toMatchObject({ billingStarted: true, billingEnded: false })
+    expect(handle.webPriceFor(Date.UTC(2026, 10, 18, 3, 59))).toMatchObject({ billingStarted: true, billingEnded: false })
+    expect(handle.webPriceFor(Date.UTC(2026, 10, 18, 4))).toMatchObject({ billingStarted: false, billingEnded: true })
     const beforeAt = (handle.currentSnapshot()?.effectiveAt ?? 0) - 1
     const before = handle.webPriceFor(beforeAt)
     await handle.refresh({ official: { ...OFFICIAL, web: { searchPerThousand: 50, fetchPerThousand: 50 } } })

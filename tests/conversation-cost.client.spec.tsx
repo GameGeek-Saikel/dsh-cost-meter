@@ -150,7 +150,8 @@ function zhT(key: string, params?: Record<string, string>): string {
     'view.output': '输出',
     'view.web': '搜索 API',
     'web.requests': '共 {search} 次成功请求',
-    'web.grace': '计费自 2026-11-01 起，当前仅计数',
+    'web.grace': '计费窗口为 2026-11-01 至 2026-11-18 12:00，窗口外仅计数',
+    'web.free': '2026-11-18 12:00 起，模型内搜索与抓取不再按次计费，仅计数',
     'view.unpriced': '{count} 步无价格',
     'view.steps': '每轮回复花费',
     'step.turn': '第 {turn} 轮',
@@ -866,6 +867,31 @@ describe('CostView', () => {
     expect(view.textContent).toContain('搜索 API')
     expect(view.textContent).toContain('¥0.01')
     expect(view.textContent).toContain('共 2 次成功请求')
+  })
+
+  it('explains why counted Search requests cost nothing', async () => {
+    stubFetch(RESPONSE)
+    const ledger = {
+      ...PROJECTION,
+      totals: { ...PROJECTION.totals, webCost: 0, searchRequests: 2 },
+      web: { searchRequests: 2, fetchRequests: 0, cost: 0, billingStarted: false },
+    }
+    const { rerender } = render(<CostView
+      useProjection={() => ledger as never}
+      sessionId={"s1" as never}
+      t={zhT}
+    />)
+    const view = await screen.findByTestId('cost-view')
+    // No billing window observed: the note describes the window itself.
+    expect(view.textContent).toContain('计费窗口为 2026-11-01 至 2026-11-18 12:00')
+    // Usage after 2026-11-18 12:00 says the model-internal calls are free.
+    rerender(<CostView
+      useProjection={() => ({ ...ledger, web: { ...ledger.web, billingEnded: true } }) as never}
+      sessionId={"s1" as never}
+      t={zhT}
+    />)
+    const ended = await screen.findByTestId('cost-view')
+    expect(ended.textContent).toContain('不再按次计费')
   })
 
   it('keeps an off-peak reply green even while the clock is in a peak hour', async () => {

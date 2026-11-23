@@ -64,8 +64,10 @@ export interface SessionCostState {
   callRoots: Record<string, CallCoordinates>
   /** Most recent (turn, step), the fallback when a PTC call has no root. */
   lastCoords: CallCoordinates | null
-  /** Whether a web call has been observed after the official billing start. */
+  /** Whether a web call has been observed inside the official billing window. */
   webBillingStarted: boolean
+  /** Whether a web call has been observed after the official billing end. */
+  webBillingEnded: boolean
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
@@ -147,6 +149,7 @@ const projectionStateSchema = z.object({
   callRoots: z.record(z.string(), coordinatesSchema).default({}),
   lastCoords: coordinatesSchema.nullable().default(null),
   webBillingStarted: z.boolean().default(false),
+  webBillingEnded: z.boolean().default(false),
 }).strict()
 
 /** Wire schema of the projection value (`wire.viewSchema`). */
@@ -155,6 +158,7 @@ const webSummarySchema = z.object({
   fetchRequests: z.number().int().nonnegative(),
   cost: z.number().nonnegative(),
   billingStarted: z.boolean(),
+  billingEnded: z.boolean(),
 }).strict()
 
 const projectionSchema = z.object({
@@ -289,8 +293,8 @@ function emptyStep(state: SessionCostState, time: number, turn: number, step: nu
 
 /**
  * Fold one completed Search / Fetch call into the step that issued it. The
- * per-request price is anchored at the call's own time; during the official
- * grace period the requests are recorded with zero cost.
+ * per-request price is anchored at the call's own time; outside the official
+ * billing window the requests are recorded with zero cost.
  * @returns the next state, or the same reference when nothing is billable.
  */
 function addWebCall(state: SessionCostState, call: PendingWebCall, success: boolean, pricebook: PricebookHandle): SessionCostState {
@@ -320,6 +324,7 @@ function addWebCall(state: SessionCostState, call: PendingWebCall, success: bool
     steps: { ...state.steps, [key]: record },
     totals: replaceTotals(state.totals, record, state.steps[key]),
     webBillingStarted: state.webBillingStarted || hit.billingStarted,
+    webBillingEnded: state.webBillingEnded || hit.billingEnded,
   }
 }
 
@@ -463,6 +468,7 @@ export function viewSessionCost(state: SessionCostState): SessionCostProjection 
       fetchRequests: state.totals.fetchRequests ?? 0,
       cost: state.totals.webCost ?? 0,
       billingStarted: state.webBillingStarted ?? false,
+      billingEnded: state.webBillingEnded ?? false,
     },
   }
 }
@@ -498,12 +504,15 @@ export function sessionCostProjection<K extends 'sessionCost' | 'sessionCostUsd'
       callRoots: {},
       lastCoords: null,
       webBillingStarted: false,
+      webBillingEnded: false,
     }),
     apply: (state, event) => foldSessionCost(state, event, pricebook),
     wire: {
       viewSchema: projectionSchema,
       view: viewSessionCost,
     },
-    stateVersion: 2,
+    // 3: the web summary gained `billingEnded`, so persisted state re-folds
+    // and old sessions pick up the billing end at 2026-11-18 12:00 Beijing.
+    stateVersion: 3,
   }
 }
