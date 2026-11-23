@@ -61,6 +61,16 @@ function npm(args) {
 /** Run npm with --json and parse the answer, tolerating leading notices. */
 function npmJson(args, online = false) {
   const text = npm([...args, ...(online ? ['--prefer-online'] : []), '--json'])
+  const trimmed = text.trim()
+  // A single requested field echoes a bare JSON scalar (a peer-less version
+  // answers `"0.1.0"`), which has no bracket for the fallback scan below.
+  if (/^["\[{]/.test(trimmed)) {
+    try {
+      return JSON.parse(trimmed)
+    } catch {
+      /* npm prefixed a notice: fall through to the bracket scan */
+    }
+  }
   const start = text.search(/[[{]/)
   if (start < 0) throw new Error(`npm ${args.join(' ')} returned no JSON: ${text}`)
   return JSON.parse(text.slice(start))
