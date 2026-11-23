@@ -172,6 +172,17 @@ function tagOf(manifest, lines) {
   return null
 }
 
+/** The registry's current dist-tags, so a reconcile only writes what drifted. */
+function currentTags(name) {
+  try {
+    // npm answers a single object as a one-element list here, like a version.
+    const tags = unwrap(npmJson(['view', name, 'dist-tags']))
+    return typeof tags === 'object' && tags !== null && !Array.isArray(tags) ? tags : {}
+  } catch {
+    return {}
+  }
+}
+
 /** Every published version of the package, in registry order. */
 function publishedVersions(name, online = false) {
   const versions = npmJson(['view', name, 'versions'], online)
@@ -252,8 +263,21 @@ if (command === 'resolve') {
   for (const { version, tag } of rows) console.error(`dist-tag: ${version} -> ${tag ?? 'unsupported (left alone)'}`)
   if (command === 'pairs') process.exit(0)
   const newest = newestPerTag(rows)
+  // Only tags that actually drift need a credential: trusted publishing binds
+  // one workflow file, so this workflow cannot mint a write token, and an
+  // idempotent run over a healthy package must not fail for that reason.
+  const current = currentTags(manifest.name)
+  const drifting = [...newest].filter(([tag, version]) => current[tag] !== version)
+  for (const [tag, version] of newest) {
+    if (!drifting.some(([driftTag]) => driftTag === tag)) console.error(`dist-tag: ${tag} -> ${version} (already)`)
+  }
+  if (drifting.length === 0) {
+    console.error('dist-tag: every tag already points at the newest supporting version')
+    process.exit(0)
+  }
   if (!dryRun) await authenticate()
   for (const [tag, version] of newest) {
+    if (!drifting.some(([driftTag]) => driftTag === tag)) continue
     if (dryRun) {
       console.error(`dist-tag: would set ${tag} -> ${version}`)
       continue
