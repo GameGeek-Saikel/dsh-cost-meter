@@ -21,7 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { defineDomain } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
-import { FALLBACK_CURRENT, FALLBACK_CURRENT_USD, FALLBACK_PEAK, FALLBACK_PEAK_USD, FALLBACK_WEB_CNY, FALLBACK_WEB_USD, fetchPricing, isPeakHour, PEAK_PRICING_START_MS, PEAK_SCHEDULE_EN, PEAK_SCHEDULE_ZH, WEB_BILLING_START_MS } from './pricing.ts'
+import { FALLBACK_CURRENT, FALLBACK_CURRENT_USD, FALLBACK_PEAK, FALLBACK_PEAK_USD, FALLBACK_WEB_CNY, FALLBACK_WEB_USD, fetchPricing, isPeakHour, PEAK_PRICING_START_MS, PEAK_SCHEDULE_EN, PEAK_SCHEDULE_ZH, WEB_BILLING_END_MS, WEB_BILLING_START_MS } from './pricing.ts'
 import { withHolidayCalendar, type HolidayOverrides } from './holidays.ts'
 import type {
   Currency,
@@ -590,8 +590,10 @@ export interface WebPriceHit {
   snapshotVersion: number | null
   /** Epoch millis the anchored snapshot became effective. */
   snapshotEffectiveAt: number | null
-  /** Whether the official billing window has started at the event time. */
+  /** Whether the per-request charge applies at the event time. */
   billingStarted: boolean
+  /** Whether the per-request charge has ended at the event time. */
+  billingEnded: boolean
 }
 
 /**
@@ -729,21 +731,26 @@ export class PricebookHandle {
 
   /**
    * Resolve the Search / Fetch prices effective at one instant. The official
-   * page bills these standalone APIs per successful request; before
-   * {@link WEB_BILLING_START_MS} the cost is zero even though requests are
-   * still counted. Synchronous, like {@link priceFor}.
+   * page billed these calls per successful request only inside
+   * [{@link WEB_BILLING_START_MS}, {@link WEB_BILLING_END_MS}); outside that
+   * window the cost is zero even though requests are still counted. The list
+   * price is still anchored to the snapshot, because a snapshot taken inside
+   * the window stays the authority for the usage it covers. Synchronous, like
+   * {@link priceFor}.
    * @param time - the instant to price for.
-   * @returns the anchored prices and whether billing has started.
+   * @returns the anchored prices and where the event falls in the billing window.
    */
   webPriceFor(time: number): WebPriceHit {
     const snapshot = this.snapshotFor(time)
     const web = snapshot?.web ?? this.webFallback()
+    const ended = time >= WEB_BILLING_END_MS
     return {
       searchPerThousand: web.searchPerThousand,
       fetchPerThousand: web.fetchPerThousand,
       snapshotVersion: snapshot?.version ?? null,
       snapshotEffectiveAt: snapshot?.effectiveAt ?? null,
-      billingStarted: time >= WEB_BILLING_START_MS,
+      billingStarted: !ended && time >= WEB_BILLING_START_MS,
+      billingEnded: ended,
     }
   }
 

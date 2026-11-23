@@ -99,7 +99,9 @@ export const CostView = memo(function CostView({ useProjection, sessionId, t }: 
         </div>
         {cost?.web !== undefined && !cost.web.billingStarted
           && (cost.web.searchRequests + cost.web.fetchRequests) > 0 && (
-          <div className={css.unpricedNote}>{t('web.grace')}</div>
+          <div className={css.unpricedNote} data-web-billing={cost.web.billingEnded === true ? 'ended' : 'before'}>
+            {t(cost.web.billingEnded === true ? 'web.free' : 'web.grace')}
+          </div>
         )}
         {totals.unpricedSteps > 0 && (
           <div className={css.unpricedNote}>{t('view.unpriced', { count: String(totals.unpricedSteps) })}</div>

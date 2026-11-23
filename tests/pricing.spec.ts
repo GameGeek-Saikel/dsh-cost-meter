@@ -22,6 +22,7 @@ import {
   PEAK_SCHEDULE_EN,
   PEAK_SCHEDULE_ZH,
   PRICING_URL_EN,
+  WEB_BILLING_END_MS,
   WEB_BILLING_START_MS,
 } from '../src/pricing.ts'
 
@@ -376,6 +377,17 @@ describe('parsePeakSchedule', () => {
     expect(parsePeakSchedule(html, 'en')).toMatchObject({ timezone: 'UTC', ranges: [[1, 4], [6, 10]] })
   })
 
+  it('parses a sentence whose windows precede the peak label', () => {
+    // The 2026-11-23 page states `…9:00 - 12:00、14:00 - 18:00 为高峰时段`.
+    const html = '<p>空闲时段价格为高峰时段价格的一半。北京时间周一至周五（不含中国法定节假日）'
+      + '9:00 - 12:00、14:00 - 18:00 为高峰时段；其余时段，包括周末及中国法定节假日全天均为空闲时段。</p>'
+    expect(parsePeakSchedule(html, 'zh')).toMatchObject({
+      timezone: 'Asia/Shanghai',
+      ranges: [[9, 12], [14, 18]],
+      weekdaysOnly: true,
+    })
+  })
+
   it('returns undefined when the page carries no schedule', () => {
     expect(parsePeakSchedule('<html>no schedule here</html>', 'zh')).toBeUndefined()
     expect(parsePeakSchedule(PAGE_HTML, 'en')).toBeUndefined()
@@ -550,7 +562,18 @@ describe('parseWebPricing', () => {
     expect(parseWebPricing('<html><td>Search</td><td>5元</td></html>', 'zh')).toBeUndefined()
   })
 
-  it('starts billing at 2026-11-01 00:00 Beijing', () => {
+  it('tolerates the 2026-11-23 section wording between the API name and its unit', () => {
+    // The page renamed the search row `Search API（文字）` / `Search API (text)`.
+    const zh = '<table><tr><td>Search API（文字）</td><td>每 1,000 次成功请求</td><td>5元</td></tr>'
+      + '<tr><td>Fetch API</td><td>每 1,000 次成功请求</td><td>5元</td></tr></table>'
+    expect(parseWebPricing(zh, 'zh')).toEqual({ searchPerThousand: 5, fetchPerThousand: 5 })
+    const en = '<table><tr><td>Search API (text)</td><td>Per 1,000 successful requests</td><td>$0.75</td></tr>'
+      + '<tr><td>Fetch API</td><td>Per 1,000 successful requests</td><td>$0.75</td></tr></table>'
+    expect(parseWebPricing(en, 'en')).toEqual({ searchPerThousand: 0.75, fetchPerThousand: 0.75 })
+  })
+
+  it('runs per-request billing from 2026-11-01 00:00 to 2026-11-18 12:00 Beijing', () => {
     expect(WEB_BILLING_START_MS).toBe(Date.UTC(2026, 9, 31, 16, 0, 0))
+    expect(WEB_BILLING_END_MS).toBe(Date.UTC(2026, 10, 18, 4, 0, 0))
   })
 })
