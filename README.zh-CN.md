@@ -121,7 +121,7 @@ pnpm build       # tsc -b && tsdown（lib/ + lib/client.js）
 
 ### 发布通道
 
-推送 `v*` 标签后由 `.github/workflows/publish.yml` 发布。标签决定 npm dist-tag，而这不只是记账问题：社区市场安装的是**不带版本号的包名**，也就是 `latest` 指向的那个版本，直接装进访客的运行时。DSH 同时并行三条发布线（`@deepseek-ai/dsh` 把当前线放在 `latest`、下一条线放在 `next`、alpha 线放在 `alpha`），而插件版本只能在它的 `@deepseek-ai/dsh*` 对等依赖所接受的那条线上运行，因此 `scripts/dist-tag.mjs` 会用这些依赖范围去比对 registry 上 DSH 自己的发布线，据此选定通道：
+推送 `v*` 标签后由 `.github/workflows/publish.yml` **暂存**发布：本仓库的 trusted publishing 只授予 `stage` 与 `dist-tag`，不授予直接 publish，因此流水线上传并生成 provenance，版本由维护者执行 `npm stage approve <stage-id>`（`npm stage list` 可查 id）后才真正上线。标签决定的是这次批准所携带的 npm dist-tag，而这不只是记账问题：社区市场安装的是**不带版本号的包名**，也就是 `latest` 指向的那个版本，直接装进访客的运行时。DSH 同时并行三条发布线（`@deepseek-ai/dsh` 把当前线放在 `latest`、下一条线放在 `next`、alpha 线放在 `alpha`），而插件版本只能在它的 `@deepseek-ai/dsh*` 对等依赖所接受的那条线上运行，因此 `scripts/dist-tag.mjs` 会用这些依赖范围去比对 registry 上 DSH 自己的发布线，据此选定通道：
 
 | 版本 | 通道 |
 |---|---|

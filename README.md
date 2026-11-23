@@ -121,7 +121,7 @@ The test suites are fully offline: pricing-page HTML, OpenRouter models, and the
 
 ### Release channels
 
-A `v*` tag push publishes through `.github/workflows/publish.yml`. The tag decides the npm dist-tag, and that choice matters beyond bookkeeping: the community market installs the bare package name — whatever `latest` names — into a visitor's runtime. DSH ships three release lines at once (`@deepseek-ai/dsh` names the current line under `latest`, the upcoming one under `next`, and the alpha line under `alpha`), and a plugin version only runs on the line its `@deepseek-ai/dsh*` peer ranges accept, so `scripts/dist-tag.mjs` reads those ranges against the registry's own DSH lines and picks the channel:
+A `v*` tag push stages the release through `.github/workflows/publish.yml`: trusted publishing for this repository grants `stage` and `dist-tag` rather than direct publish, so the run uploads and provenances the version and it goes live when a maintainer runs `npm stage approve <stage-id>` (`npm stage list` prints the id). The tag decides the npm dist-tag that the approval carries, and that choice matters beyond bookkeeping: the community market installs the bare package name — whatever `latest` names — into a visitor's runtime. DSH ships three release lines at once (`@deepseek-ai/dsh` names the current line under `latest`, the upcoming one under `next`, and the alpha line under `alpha`), and a plugin version only runs on the line its `@deepseek-ai/dsh*` peer ranges accept, so `scripts/dist-tag.mjs` reads those ranges against the registry's own DSH lines and picks the channel:
 
 | Version | Channel |
 |---|---|
