@@ -4,15 +4,24 @@
  * table, the peak/off-peak bands, and the peak-hour schedule, so price
  * changes, model renames, and schedule changes never require a plugin update.
  *
- * The page's shape as of 2026-09-10: one combined table whose bucket rows
+ * The page's shape as of 2026-11-23: one combined table whose bucket rows
  * carry the OFF-PEAK cells then the PEAK cells of the `deepseek-flash` and
  * `deepseek-v4-pro` columns, plus a footnote stating that peak hours are
  * Beijing time 09:00-12:00 / 14:00-18:00 Monday through Friday (01:00-04:00 /
  * 06:00-10:00 UTC), everything else — including all of Saturday and Sunday —
  * off-peak. The retired ids `deepseek-v4-flash` and
  * `deepseek-v4-flash-vision-exp` no longer have a column; the page states
- * they are served by V4.1-Flash and billed at the Flash price, which is what
- * the `flash` pricing key resolves them to.
+ * they are served by DeepSeek-V4.1-Flash-1017 and billed at the Flash price,
+ * which is what the `flash` pricing key resolves them to.
+ *
+ * Two parts of that page move independently of the token table. The Search /
+ * Fetch section names its rows `Search API（文字）` / `Search API (text)` since
+ * 2026-11-23, so the row patterns tolerate the section wording in between. The
+ * billing rule for those calls moved twice: per-request billing started at
+ * 2026-11-01 00:00 Beijing, and from 2026-11-18 12:00 Beijing the server-side
+ * search and fetch a model call triggers are no longer billed at all — their
+ * results bill as model tokens. The page also lists File Parsing & OCR and
+ * Speech prices, which this plugin does not meter.
  *
  * The parser is deliberately tolerant: it matches price cells next to the
  * bucket labels and model names anywhere in the HTML, so reordering or
@@ -75,12 +84,13 @@ export const FALLBACK_CURRENT: CurrentPricing = {
 }
 
 /**
- * Built-in fallback for the peak table: the 2026-09-10 official list (CNY per
- * 1M tokens), i.e. the `deepseek-flash` and `deepseek-v4-pro` columns. The
- * peak half is twice the off-peak half, as the page's footnote states. These
- * values back every snapshot taken while the page is unreachable, so they must
- * track the live page — a stale pair silently reprices usage (the Flash column
- * used to be 0.05 / 1.5 / 4.5 off-peak before the V4.1-Flash price cut).
+ * Built-in fallback for the peak table: the official list (CNY per 1M tokens),
+ * unchanged on the 2026-11-23 page, i.e. the `deepseek-flash` and
+ * `deepseek-v4-pro` columns. The peak half is twice the off-peak half, as the
+ * page's footnote states. These values back every snapshot taken while the page
+ * is unreachable, so they must track the live page — a stale pair silently
+ * reprices usage (the Flash column used to be 0.05 / 1.5 / 4.5 off-peak before
+ * the V4.1-Flash price cut).
  */
 export const FALLBACK_PEAK: PeakPricing = {
   flash: {
@@ -117,9 +127,10 @@ export const FALLBACK_PEAK_USD: PeakPricing = {
 
 /**
  * Built-in fallback for the Search / Fetch API list (CNY per 1,000 successful
- * requests): the 2026-10-30 official page lists 5元 each. The page bills these
- * standalone APIs per successful request, and the current grace period ends at
- * 2026-11-01 00:00 Beijing.
+ * requests): the 2026-11-23 official page still lists 5元 each. These are the
+ * standalone API rates, which stay the anchored price for usage inside the
+ * per-request billing window; the page stopped billing model-triggered calls at
+ * 2026-11-18 12:00 Beijing.
  */
 export const FALLBACK_WEB_CNY: WebPricing = {
   searchPerThousand: 5,
@@ -139,14 +150,30 @@ export const FALLBACK_WEB_USD: WebPricing = {
  */
 export const WEB_BILLING_START_MS = Date.UTC(2026, 9, 31, 16, 0, 0)
 
-/** Chinese Search row: `Search 每 1,000 次成功请求 5元` (table cell order may vary). */
-const ZH_WEB_SEARCH_RE = /Search\s+每\s*1[,，]?000\s*次成功请求\s+(\d+(?:\.\d+)?)\s*元/i
+/**
+ * Official Search / Fetch billing end for model-triggered calls: 2026-11-18
+ * 12:00 Beijing (UTC+8). From this instant the page states that server-side
+ * search and web fetch triggered by a model call are no longer billed; the
+ * results they return bill as model token usage instead. Per-request billing
+ * therefore covers only [start, end); the plugin keeps counting requests and
+ * prices them at zero outside that window.
+ */
+export const WEB_BILLING_END_MS = Date.UTC(2026, 10, 18, 4, 0, 0)
+
+/**
+ * Words allowed between a row's API name and its unit, such as `API（文字）` in
+ * `Search API（文字） 每 1,000 次成功请求 5元`. Bounded and digit-free so the
+ * match never runs into the next row's numbers.
+ */
+const WEB_ROW_GAP = '[^\\d。]{0,24}?'
+/** Chinese Search row: `Search API（文字） 每 1,000 次成功请求 5元`. */
+const ZH_WEB_SEARCH_RE = new RegExp(`Search${WEB_ROW_GAP}每\\s*1[,，]?000\\s*次成功请求\\s*(\\d+(?:\\.\\d+)?)\\s*元`, 'i')
 /** Chinese Fetch row. */
-const ZH_WEB_FETCH_RE = /Fetch\s+每\s*1[,，]?000\s*次成功请求\s+(\d+(?:\.\d+)?)\s*元/i
-/** English Search row: `Search Per 1,000 successful requests $0.75`. */
-const EN_WEB_SEARCH_RE = /Search\s+Per\s+1[,，]?000\s+successful\s+requests\s+\$\s*(\d+(?:\.\d+)?)/i
+const ZH_WEB_FETCH_RE = new RegExp(`Fetch${WEB_ROW_GAP}每\\s*1[,，]?000\\s*次成功请求\\s*(\\d+(?:\\.\\d+)?)\\s*元`, 'i')
+/** English Search row: `Search API (text) Per 1,000 successful requests $0.75`. */
+const EN_WEB_SEARCH_RE = new RegExp(`Search${WEB_ROW_GAP}Per\\s+1[,，]?000\\s+successful\\s+requests\\s+\\$\\s*(\\d+(?:\\.\\d+)?)`, 'i')
 /** English Fetch row. */
-const EN_WEB_FETCH_RE = /Fetch\s+Per\s+1[,，]?000\s+successful\s+requests\s+\$\s*(\d+(?:\.\d+)?)/i
+const EN_WEB_FETCH_RE = new RegExp(`Fetch${WEB_ROW_GAP}Per\\s+1[,，]?000\\s+successful\\s+requests\\s+\\$\\s*(\\d+(?:\\.\\d+)?)`, 'i')
 
 /**
  * Parse the Search / Fetch price table from an official pricing page. The
@@ -461,35 +488,37 @@ const SCHEDULE_WINDOWS_RE = /(\d{1,2}):(\d{2})\s*[-–—~至]\s*(\d{1,2}):(\d{2
  */
 export function parsePeakSchedule(html: string, locale: 'zh' | 'en' = 'zh'): PeakSchedule | undefined {
   const text = stripHtml(html)
-  // The pricing table itself repeats `高峰时段` as a band label, so the zh
-  // search targets the schedule sentence (the label followed by a time).
-  const labelMatch = locale === 'zh'
-    ? /高峰时段[^。]{0,160}?\d{1,2}:\d{2}/i.exec(text)
-    : /peak\s*hours?/i.exec(text)
-  if (labelMatch === null) return undefined
-  const window = text.slice(labelMatch.index, labelMatch.index + 220)
-  const match = SCHEDULE_WINDOWS_RE.exec(window)
-  if (match === null) return undefined
-  const ranges: PeakHourRange[] = [
-    [Number(match[1]), Number(match[3])],
-    [Number(match[5]), Number(match[7])],
-  ]
-  if (ranges.some(([start, end]) =>
-    !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > 24 || start >= end)) {
-    return undefined
+  // The pricing table repeats `高峰时段` as a band label, and the page may state
+  // its windows either before or after the label, so every label occurrence is
+  // a candidate: the first one that has a window pair anywhere beside it wins.
+  const labelRe = new RegExp(locale === 'zh' ? '高峰时段' : 'peak\\s*hours?', 'gi')
+  for (const labelMatch of text.matchAll(labelRe)) {
+    const index = labelMatch.index ?? 0
+    const window = text.slice(Math.max(0, index - 200), index + 220)
+    const match = SCHEDULE_WINDOWS_RE.exec(window)
+    if (match === null) continue
+    const ranges: PeakHourRange[] = [
+      [Number(match[1]), Number(match[3])],
+      [Number(match[5]), Number(match[7])],
+    ]
+    if (ranges.some(([start, end]) =>
+      !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > 24 || start >= end)) {
+      continue
+    }
+    // Timezone and weekday wording sit beside the windows, not necessarily
+    // beside the label, so the context is centred on the matched window.
+    const windowStart = window.indexOf(match[0])
+    const context = window.slice(Math.max(0, windowStart - 160), windowStart + match[0].length + 120)
+    const weekdaysOnly = /(?:周一|星期[一二三四五]|工作日)/.test(context)
+      || /\b(?:Monday\s+through\s+Friday|weekdays?)\b/i.test(context)
+    // The page states the holiday exclusion but never its dates, so the parsed
+    // schedule carries the built-in calendar; a deployment's adjustments are
+    // composed on top of it by the pricebook.
+    const beijing = /\b(?:beijing|北京时间|china standard)\b/i.test(context) || /\butc\s*\+\s*8\b/i.test(context)
+    const timezone = beijing ? 'Asia/Shanghai' : /\butc\b/i.test(context) ? 'UTC' : 'Asia/Shanghai'
+    return withHolidayCalendar({ timezone, ranges, ...(weekdaysOnly ? { weekdaysOnly: true } : {}) })
   }
-  const weekdaysOnly = /(?:周一|星期[一二三四五]|工作日)/.test(window)
-    || /\b(?:Monday\s+through\s+Friday|weekdays?)\b/i.test(window)
-  // The page states the holiday exclusion but never its dates, so the parsed
-  // schedule carries the built-in calendar; a deployment's adjustments are
-  // composed on top of it by the pricebook.
-  if (/\b(?:beijing|北京时间|china standard)\b/i.test(window) || /\butc\s*\+\s*8\b/i.test(window)) {
-    return withHolidayCalendar({ timezone: 'Asia/Shanghai', ranges, ...(weekdaysOnly ? { weekdaysOnly: true } : {}) })
-  }
-  if (/\butc\b/i.test(window)) {
-    return withHolidayCalendar({ timezone: 'UTC', ranges, ...(weekdaysOnly ? { weekdaysOnly: true } : {}) })
-  }
-  return withHolidayCalendar({ timezone: 'Asia/Shanghai', ranges, ...(weekdaysOnly ? { weekdaysOnly: true } : {}) })
+  return undefined
 }
 
 /**

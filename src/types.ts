@@ -419,15 +419,18 @@ export interface SessionCostProjection {
   /** Cumulative totals. */
   totals: SessionCostTotals
   /**
-   * Search/Fetch billing summary. `billingStarted` is false during the
-   * official grace period (before 2026-11-01 00:00 Beijing), when requests
-   * are counted but priced at zero.
+   * Search/Fetch billing summary. `billingStarted` is true only for usage
+   * inside the official per-request window (2026-11-01 00:00 to 2026-11-18
+   * 12:00 Beijing); `billingEnded` marks usage from the instant the page made
+   * model-triggered search and fetch free. Requests are counted either way and
+   * priced at zero outside the window.
    */
   web?: {
     searchRequests: number
     fetchRequests: number
     cost: number
     billingStarted: boolean
+    billingEnded?: boolean
   }
 }
 

@@ -62,6 +62,8 @@ function event(type: string, time: number, data: Record<string, unknown>): Sessi
 const POST_WEB_BILLING = Date.UTC(2026, 10, 2, 2, 0, 0)
 /** 2026-10-30 10:00 Beijing: inside the official grace period. */
 const PRE_WEB_BILLING = Date.UTC(2026, 9, 30, 2, 0, 0)
+/** 2026-11-18 12:00 Beijing: the page stops billing model-triggered search. */
+const POST_WEB_FREE = Date.UTC(2026, 10, 18, 4, 0, 0)
 
 function toolCall(time: number, turn: number, step: number, callId: string, name: string, args: unknown): SessionEvent {
   return event('tool/call', time, { turn, step, callId, name, arguments: JSON.stringify(args) })
@@ -271,6 +273,18 @@ describe('Search / Fetch billing', () => {
     const view = viewSessionCost(state)
     expect(view.web).toMatchObject({ searchRequests: 1, cost: 0, billingStarted: false })
     expect(view.totals.cost).toBe(0)
+  })
+
+  it('counts requests after the 2026-11-18 12:00 free start but prices them at zero', () => {
+    const handle = handleWith([snapshotFixture(1, 0)])
+    let state = init()
+    state = foldSessionCost(state, headerEvent(1_000), handle)
+    state = foldSessionCost(state, toolCall(POST_WEB_FREE, 1, 1, 'c1', 'web_search', { queries: ['a', 'b'] }), handle)
+    state = foldSessionCost(state, toolResult(POST_WEB_FREE + 10, 1, 1, 'c1'), handle)
+    const view = viewSessionCost(state)
+    expect(view.web).toMatchObject({ searchRequests: 2, cost: 0, billingStarted: false, billingEnded: true })
+    expect(view.totals.cost).toBe(0)
+    expect(view.steps[0].searchRequests).toBe(2)
   })
 
   it('never bills a failed call', () => {
