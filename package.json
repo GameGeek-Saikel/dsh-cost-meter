@@ -119,11 +119,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Saikel-Orado-Liu/dsh-cost-meter.git"
+    "url": "git+https://github.com/GameGeek-Saikel/dsh-cost-meter.git"
   },
-  "homepage": "https://github.com/Saikel-Orado-Liu/dsh-cost-meter#readme",
+  "homepage": "https://github.com/GameGeek-Saikel/dsh-cost-meter#readme",
   "bugs": {
-    "url": "https://github.com/Saikel-Orado-Liu/dsh-cost-meter/issues"
+    "url": "https://github.com/GameGeek-Saikel/dsh-cost-meter/issues"
   },
   "keywords": [
     "deepseek",
