@@ -188,6 +188,10 @@ describe('apply integration', () => {
     expect(body.pricebook.current?.source).toBe('official')
     expect(body.pricebook.current?.prices.flash?.single?.inputPerMillion).toBe(1)
     expect(body.pricebook.balanceEnabled).toBe(true)
+    // The polled route must not ship the snapshot history: every snapshot
+    // carries the whole model table, and the browser reads only the current
+    // one.
+    expect(body.pricebook.snapshots).toBeUndefined()
   })
 
   it('refreshes the pricebook over POST (the only remaining action)', async () => {
@@ -240,6 +244,64 @@ describe('apply integration', () => {
     expect(body.subagents[0]?.depth).toBe(1)
     expect(body.subagents[0]?.label).toBe('probe')
     expect(body.subagents[0]?.totals.cost).toBeCloseTo(0.9)
+  })
+
+  it('bounds the balance refresh so a stalled credential lookup cannot pin the route', async () => {
+    // A resumed machine can leave the credential seam pending forever. The
+    // shared refresh must settle on its own deadline, otherwise every later
+    // poll awaits the same never-settling promise and the balance can never
+    // come back without restarting the Host.
+    const harness = makeContext()
+    harness.ctx.get = ((name: string) => (name === 'credentials'
+      ? { resolve: () => new Promise(() => { /* never settles */ }) }
+      : undefined)) as Context['get']
+    await apply(harness.ctx, { pricingRefreshHours: 1 })
+    const route = harness.routes.find(candidate => candidate.path === '/cost-meter')!
+    const { state, res } = responder()
+
+    vi.useFakeTimers()
+    try {
+      const pending = route.handler(req('GET') as never, res as never)
+      await vi.advanceTimersByTimeAsync(15_000)
+      await pending
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(state.status).toBe(200)
+    const body = JSON.parse(state.body) as ConversationCostResponse
+    expect(body.balance).toMatchObject({ ok: false, code: 'TIMEOUT' })
+    expect(body.pricebook.current?.source).toBe('official')
+  })
+
+  it('drops subagent rows that miss their deadline instead of holding the response', async () => {
+    const harness = makeContext()
+    const original = harness.ctx.get
+    harness.ctx.get = ((name: string) => (name === 'sessions'
+      ? { get: () => undefined, list: () => [] }
+      : name === 'subagents'
+        ? { listDescendants: () => new Promise(() => { /* never settles */ }) }
+        : name === 'credentials'
+          ? { resolve: async () => ({ value: 'sk-test' }) }
+          : original(name))) as Context['get']
+    await apply(harness.ctx, { pricingRefreshHours: 1 })
+    const route = harness.routes.find(candidate => candidate.path === '/cost-meter')!
+    const { state, res } = responder()
+    const request = { method: 'GET', headers: { host: '127.0.0.1:3080' }, url: '/cost-meter?session=root' }
+
+    vi.useFakeTimers()
+    try {
+      const pending = route.handler(request as never, res as never)
+      await vi.advanceTimersByTimeAsync(10_000)
+      await pending
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(state.status).toBe(200)
+    const body = JSON.parse(state.body) as ConversationCostResponse
+    expect(body.subagents).toEqual([])
+    expect(body.balance?.ok).toBe(true)
   })
 
   it('answers without subagents when the durable listing fails', async () => {

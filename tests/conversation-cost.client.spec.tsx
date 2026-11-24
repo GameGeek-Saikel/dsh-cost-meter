@@ -31,6 +31,7 @@ import type { BalanceSnapshot, ConversationCostResponse, SessionCostProjection }
 import { AssistantCostChip, stepOf, stepsOfTurn } from '../src/client/AssistantCostChip.tsx'
 import { cacheReadRatioOf, estimateCost, estimateTokens, peakOffPeakMultiplier } from '../src/client/cost-math.ts'
 import { CostPluginCard } from '../src/client/CostPluginCard.tsx'
+import { resetCostFeed } from '../src/client/cost-feed.ts'
 import { CostView } from '../src/client/CostView.tsx'
 import { currencySymbol, formatMoney, formatMultiplier, formatPercent } from '../src/client/format.ts'
 import { SessionCostLine, ENDPOINT } from '../src/client/SessionCostLine.tsx'
@@ -38,6 +39,9 @@ import { SessionCostPill } from '../src/client/SessionCostPill.tsx'
 
 afterEach(() => {
   cleanup()
+  // The route feed is module-global (that is its point): every case starts
+  // from an empty feed so one case's payload never answers the next one.
+  resetCostFeed()
   vi.unstubAllGlobals()
 })
 
@@ -481,6 +485,92 @@ describe('SessionCostLine', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('shared cost feed', () => {
+  const line = (sessionId = 's1') => (
+    <SessionCostLine
+      useProjection={() => PROJECTION as never}
+      sessionId={sessionId as never}
+      t={zhT}
+    />
+  )
+  const pill = (sessionId = 's1') => (
+    <SessionCostPill
+      useSession={((selector: (s: never) => unknown) => selector({ running: false } as never)) as never}
+      useProjection={() => PROJECTION as never}
+      sessionId={sessionId as never}
+      t={zhT}
+    />
+  )
+
+  it('answers every surface sharing a key from one request per interval', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetches = stubFetch(RESPONSE)
+      render(<>{line()}{pill()}</>)
+      await vi.advanceTimersByTimeAsync(0)
+      // Two surfaces, one feed, one request: the dock row and the header pill
+      // read the same balance and pricebook.
+      expect(fetches).toHaveBeenCalledTimes(1)
+      expect(fetches).toHaveBeenCalledWith(`${ENDPOINT}?session=s1&currency=CNY`, expect.objectContaining({ cache: 'no-store' }))
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(fetches).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('retries a failed poll after five seconds instead of a full minute', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetches = vi.fn()
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockResolvedValue({ ok: true, status: 200, json: async () => RESPONSE })
+      vi.stubGlobal('fetch', fetches)
+      render(line())
+      await vi.advanceTimersByTimeAsync(0)
+      expect(screen.getByText(/余额不可用/)).not.toBeNull()
+      // The recovery retry does not wait for the 60s refresh interval.
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(fetches).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(screen.queryByText(/余额不可用/)).toBeNull()
+      expect(screen.getByText(/余额 ¥110\.00/)).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the last good balance when a later poll fails', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetches = vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => RESPONSE })
+        .mockRejectedValue(new Error('offline'))
+      vi.stubGlobal('fetch', fetches)
+      render(line())
+      await vi.advanceTimersByTimeAsync(0)
+      expect(screen.getByText(/余额 ¥110\.00/)).not.toBeNull()
+      // A transient failure never blanks what the surface already had.
+      await vi.advanceTimersByTimeAsync(60_000)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(screen.queryByText(/余额不可用/)).toBeNull()
+      expect(screen.getByText(/余额 ¥110\.00/)).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reloads at once when the browser comes back online', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    render(line())
+    await screen.findByText(/余额不可用/)
+    const recovered = stubFetch(RESPONSE)
+    window.dispatchEvent(new Event('online'))
+    await screen.findByText(/余额 ¥110\.00/)
+    expect(recovered).toHaveBeenCalledTimes(1)
   })
 })
 

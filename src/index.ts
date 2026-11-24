@@ -13,6 +13,13 @@
  * route serves the balance + pricebook view (GET) and applies settings
  * mutations and manual refreshes (POST, trust-fenced like the balance route).
  *
+ * Every remote read behind that route is deadline-bounded: one balance refresh
+ * shares a single in-flight promise, so a stalled credential lookup or provider
+ * call would otherwise pin every later poll to the same never-settling promise
+ * (the failure that a sleep/resume or a network change used to trigger). The
+ * subagent aggregation is bounded the same way and the two sources are fetched
+ * concurrently, so neither can keep the response from being written.
+ *
  * @module @gamegeek-saikel/dsh-cost-meter
  */
 
@@ -68,6 +75,21 @@ export const DEFAULT_REFRESH_MS = 60_000
 const FAILED_REFRESH_MS = 10_000
 /** Per-request timeout for the provider balance call (milliseconds). */
 const BALANCE_TIMEOUT_MS = 10_000
+/**
+ * Hard deadline for one balance refresh, credential resolution included
+ * (milliseconds). The provider call has its own abort timeout, but resolving
+ * the key through the credential seam happens before that signal exists and
+ * can stall on a resumed machine or a reconnecting credential backend; without
+ * an outer deadline a single stall would pin the shared in-flight promise
+ * forever and no later poll could ever fetch the balance again.
+ */
+export const BALANCE_DEADLINE_MS = 15_000
+/**
+ * Hard deadline for one request's subagent aggregation (milliseconds). A cold
+ * ledger restore reads a stored session log; a stalled read must not hold the
+ * whole route (and with it the balance) hostage.
+ */
+export const SUBAGENT_DEADLINE_MS = 10_000
 /** Default cadence for re-fetching the official pricing page (hours). */
 export const DEFAULT_PRICING_REFRESH_HOURS = 6
 /** Max POST body accepted by the settings route (bytes). */
@@ -271,6 +293,36 @@ export async function resolveApiKey(ctx: Context, env: string): Promise<string |
 }
 
 /**
+ * Settle `work` or reject once `ms` elapses, whichever comes first. The
+ * timer is unref'd so a pending deadline never keeps the process alive, and it
+ * is cleared as soon as the work settles.
+ * @param work - the promise to bound.
+ * @param ms - deadline in milliseconds.
+ * @param label - human-readable subject, used in the timeout error.
+ * @returns the work's value.
+ * @throws {Error} `"<label> timed out after <ms>ms"` when the deadline wins.
+ */
+async function withDeadline<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** Whether an error came from {@link withDeadline} rather than the work itself. */
+function isDeadlineError(error: unknown): boolean {
+  return error instanceof Error && / timed out after \d+ms$/.test(error.message)
+}
+
+/**
  * Parse the first balance row, converting the provider's decimal strings to
  * numbers.
  * @param wire - the parsed provider response.
@@ -464,6 +516,11 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
   }, 'cost-meter: session projections')
 
   // ── Balance: cached refresh, one in-flight at a time. ──
+  //
+  // The in-flight promise is shared by every poll, so it must settle no matter
+  // what the provider or the credential seam does: a permanently pending
+  // refresh would answer every later request with the same never-settling
+  // promise, and the balance could not come back without restarting the Host.
   let lastBalance: { at: number; snapshot: BalanceSnapshot } | undefined
   let inflight: Promise<BalanceSnapshot> | undefined
   const refresh = (): Promise<BalanceSnapshot> => {
@@ -475,18 +532,19 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
       return Promise.resolve(lastBalance.snapshot)
     }
     if (inflight === undefined) {
-      inflight = fetchBalance(ctx, resolved).then((snapshot) => {
-        lastBalance = { at: Date.now(), snapshot }
-        inflight = undefined
-        return snapshot
-      }, (error) => {
-        inflight = undefined
-        return {
+      inflight = withDeadline(fetchBalance(ctx, resolved), BALANCE_DEADLINE_MS, 'cost-meter: balance refresh')
+        .catch((error: unknown): BalanceSnapshot => ({
           ok: false,
-          code: 'INTERNAL',
+          code: isDeadlineError(error) ? 'TIMEOUT' : 'INTERNAL',
           message: `cost-meter: ${error instanceof Error ? error.message : String(error)}`,
-        } as BalanceSnapshot
-      })
+        }))
+        .then((snapshot) => {
+          lastBalance = { at: Date.now(), snapshot }
+          return snapshot
+        })
+        .finally(() => {
+          inflight = undefined
+        })
     }
     return inflight
   }
@@ -528,28 +586,63 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
     }
   }
 
-  const buildResponse = async (rootSessionId: string | undefined, currency: 'CNY' | 'USD'): Promise<ConversationCostResponse> => {
-    const agents = ctx.get('agents') as SubagentAgentsService | undefined
+  /**
+   * Collect the requesting conversation's subagent rows, bounded by
+   * {@link SUBAGENT_DEADLINE_MS}. A stalled cold-log read degrades to "no
+   * subagent rows" instead of holding the response (and the balance with it).
+   */
+  const subagentsOf = async (rootSessionId: string | undefined, currency: 'CNY' | 'USD'): Promise<ConversationCostResponse['subagents']> => {
     const sessionsStore = ctx.get('sessions') as SubagentSessionsService | undefined
+    if (rootSessionId === undefined || sessionsStore === undefined) return []
+    const agents = ctx.get('agents') as SubagentAgentsService | undefined
     const subagentTree = ctx.get('subagents') as SubagentTreeService | undefined
     const sessionQuery = ctx.get('sessionQuery') as SubagentQueryService | undefined
-    const pricebook = currency === 'USD' ? pricebookUsd : pricebookCny
     const projectionKey = currency === 'USD' ? 'sessionCostUsd' : 'sessionCost'
-    const subagents = rootSessionId === undefined || sessionsStore === undefined
-      ? []
-      : await collectSubagentCosts(
-        rootSessionId,
-        agents,
-        sessionsStore,
-        ctx.sessionProjections,
-        projectionKey,
-        subagentTree,
-        sessionQuery,
+    try {
+      return await withDeadline(
+        collectSubagentCosts(
+          rootSessionId,
+          agents,
+          sessionsStore,
+          ctx.sessionProjections,
+          projectionKey,
+          subagentTree,
+          sessionQuery,
+        ),
+        SUBAGENT_DEADLINE_MS,
+        'cost-meter: subagent aggregation',
       )
+    } catch {
+      return []
+    }
+  }
+
+  // The balance and the subagent rows are independent sources: fetch them
+  // concurrently so one slow source cannot delay the other, and neither can
+  // keep the response from being written.
+  const buildResponse = async (rootSessionId: string | undefined, currency: 'CNY' | 'USD'): Promise<ConversationCostResponse> => {
+    const pricebook = currency === 'USD' ? pricebookUsd : pricebookCny
+    const [balance, subagents] = await Promise.all([
+      refresh(),
+      subagentsOf(rootSessionId, currency),
+    ])
     return {
-      balance: await refresh(),
+      balance,
       pricebook: pricebook.view(),
       subagents,
+    }
+  }
+
+  /**
+   * Write the aggregated view, turning an unexpected failure into a readable
+   * 500 instead of the web server's empty 400. The browser keeps its last good
+   * payload and retries on its own schedule.
+   */
+  const reply = async (res: ServerResponse, rootSessionId: string | undefined, currency: 'CNY' | 'USD'): Promise<void> => {
+    try {
+      respond(res, 200, await buildResponse(rootSessionId, currency))
+    } catch (error) {
+      respond(res, 500, { error: `cost-meter: ${error instanceof Error ? error.message : String(error)}` })
     }
   }
 
@@ -583,10 +676,10 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
           respond(res, 500, { error: error instanceof Error ? error.message : String(error) })
           return
         }
-        respond(res, 200, await buildResponse(sessionOf(req), currencyOf(req)))
+        await reply(res, sessionOf(req), currencyOf(req))
         return
       }
-      respond(res, 200, await buildResponse(sessionOf(req), currencyOf(req)))
+      await reply(res, sessionOf(req), currencyOf(req))
     },
   }
   ctx.effect(() => ctx.webServer.register(route), 'cost-meter: /cost-meter route')

@@ -25,10 +25,10 @@ import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-ui-conversati
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: merges the contextPressure key into SessionProjectionMap.
 import type {} from '@deepseek-ai/dsh-token-meter/client'
-import type { ConversationCostResponse, SessionCostProjection } from '../types.ts'
+import type { SessionCostProjection } from '../types.ts'
 import { bandForTime, blocksOutputTokens, bucketAt, cacheReadRatioOf, costLookupFor, estimateCost, peakOffPeakMultiplier } from './cost-math.ts'
 import { currencySymbol, displayCurrency, formatMoney, formatMultiplier, formatTime } from './format.ts'
-import { ENDPOINT, REFRESH_MS } from './SessionCostLine.tsx'
+import { useCostFeed } from './cost-feed.ts'
 import css from './SessionCostPill.module.css'
 
 export type PillLocale = PropsLocale<'cost-meter'>['t']
@@ -80,30 +80,9 @@ export const SessionCostPill = memo(function SessionCostPill({ useSession, usePr
   // leaves its output unestimated.
   const partial = null
   const [open, setOpen] = useState(false)
-  const [response, setResponse] = useState<ConversationCostResponse | null>(null)
+  const { response } = useCostFeed(sessionId, currency)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   useDismissOutside(open, () => setOpen(false), wrapRef)
-
-  useEffect(() => {
-    let alive = true
-    let timer: number | undefined
-    const endpoint = `${ENDPOINT}?session=${encodeURIComponent(sessionId)}&currency=${currency}`
-    const load = (): void => {
-      void fetch(endpoint, { cache: 'no-store' })
-        .then(res => (res.ok ? res.json() as Promise<ConversationCostResponse> : null))
-        .then((data) => {
-          if (!alive || data === null) return
-          setResponse(data)
-        })
-        .catch(() => { /* the pill keeps the last good pricebook */ })
-    }
-    load()
-    timer = window.setInterval(load, REFRESH_MS)
-    return () => {
-      alive = false
-      if (timer !== undefined) window.clearInterval(timer)
-    }
-  }, [sessionId, currency])
 
   const projection = cost
   const model = projection?.model ?? null

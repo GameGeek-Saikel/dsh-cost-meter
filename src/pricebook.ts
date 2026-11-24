@@ -946,7 +946,13 @@ export class PricebookHandle {
     }
   }
 
-  /** The read-side payload for the route. */
+  /**
+   * The read-side payload for the route. Snapshot history is deliberately left
+   * out: every snapshot carries the full model table, so a capped history
+   * reaches several megabytes, and the route is polled every minute by every
+   * open surface. Readers need the current snapshot and the configuration that
+   * shapes it, not the history.
+   */
   view(): PricebookView {
     const errors: NonNullable<PricebookView['errors']> = {}
     if (this.lastOfficial.error !== undefined) errors.official = this.lastOfficial.error
@@ -955,7 +961,6 @@ export class PricebookHandle {
     return {
       currency: this.currency,
       current: this.currentSnapshot() ?? null,
-      snapshots: this.state.snapshots,
       overrides: this.state.overrides,
       aliases: this.state.aliases,
       cacheReadDiscount: this.state.cacheReadDiscount,

@@ -293,8 +293,13 @@ export interface PricebookView {
   currency: Currency
   /** The newest snapshot; null before the first successful refresh. */
   current: PricebookSnapshot | null
-  /** Snapshot history, newest last (capped at the configured limit). */
-  snapshots: PricebookSnapshot[]
+  /**
+   * Snapshot history, newest last (capped at the configured limit). Optional
+   * because the served view omits it: each snapshot carries the full model
+   * table, so the capped history runs to megabytes and the polled route would
+   * ship all of it every minute.
+   */
+  snapshots?: PricebookSnapshot[]
   /** Manual overrides, keyed by canonical model key. */
   overrides: Record<string, ModelPrice>
   /** OpenRouter id → canonical key aliases. */
@@ -480,7 +485,7 @@ export interface SessionCostIndex {
 export interface ConversationCostResponse {
   /** Latest balance snapshot; null before the first successful fetch. */
   balance: BalanceSnapshot | null
-  /** The pricebook view: current snapshot, history, and configuration. */
+  /** The pricebook view: current snapshot and configuration (no history). */
   pricebook: PricebookView
   /** Descendant subagent sessions of the requested session, with their totals. */
   subagents: SubagentCost[]

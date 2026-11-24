@@ -9,11 +9,12 @@
  * capsule (11px/17px, `success` off-peak / `danger` peak), the same tag
  * geometry every other tag control in the product uses.
  */
-import { memo, useEffect, useState } from 'react'
+import { memo } from 'react'
 import { Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ConversationCostResponse, SessionCostStep } from '../types.ts'
+import type { SessionCostStep } from '../types.ts'
+import { useCostFeed } from './cost-feed.ts'
 import { bandForTime, costLookupFor, peakOffPeakMultiplier } from './cost-math.ts'
 import { currencySymbol, displayCurrency, formatMoney, formatMultiplier, formatTime } from './format.ts'
 import css from './CostView.module.css'
@@ -45,22 +46,8 @@ export const CostView = memo(function CostView({ useProjection, sessionId, t }: 
   const costCny = useProjection('sessionCost')
   const costUsd = useProjection('sessionCostUsd')
   const cost = currency === 'USD' ? costUsd : costCny
-  const [response, setResponse] = useState<ConversationCostResponse | null>(null)
+  const { response } = useCostFeed(sessionId, currency)
   const symbol = currencySymbol(currency)
-
-  useEffect(() => {
-    let alive = true
-    void fetch(`/cost-meter?session=${encodeURIComponent(sessionId)}&currency=${currency}`, { cache: 'no-store' })
-      .then(res => (res.ok ? res.json() as Promise<ConversationCostResponse> : null))
-      .then((data) => {
-        if (!alive || data === null) return
-        setResponse(data)
-      })
-      .catch(() => { /* the tab keeps the last good aggregation */ })
-    return () => {
-      alive = false
-    }
-  }, [sessionId, currency])
 
   const rows = cost?.steps ?? []
   const lookup = costLookupFor(cost?.totals, response?.subagents)

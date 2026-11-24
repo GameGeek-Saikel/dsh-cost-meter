@@ -2,7 +2,7 @@
  * Composer-dock readout: the current session's anchored spend (the
  * `sessionCost` projection — price-snapshot-anchored, never recomputed at
  * current prices) plus the DeepSeek account balance (host `/cost-meter` route),
- * refreshed every minute.
+ * read from the shared minute-polled feed in `cost-feed.ts`.
  *
  * Presentation copies the shipped dock readout (`StatsPills` in ui-chat): a
  * single capsule holding an icon plus a label whose parts are joined by the
@@ -24,16 +24,17 @@ import {
 import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { BalanceSnapshot, ConversationCostResponse, SessionCostProjection } from '../types.ts'
+import type { BalanceSnapshot, SessionCostProjection } from '../types.ts'
 import { useAnchorStyle } from './anchor-name.ts'
+import { useCostFeed } from './cost-feed.ts'
 import { costLookupFor } from './cost-math.ts'
 import { currencySymbol, displayCurrency, formatMoney, formatTime } from './format.ts'
 import css from './SessionCostLine.module.css'
 
-/** Host route serving the balance snapshot and the pricebook view. */
-export const ENDPOINT = '/cost-meter'
-/** Balance refresh interval in milliseconds. */
-export const REFRESH_MS = 60_000
+// The dock row and the header pill live in different modules but read the same
+// feed; the constants stay exported here for callers that import them from the
+// dock module.
+export { ENDPOINT, REFRESH_MS } from './cost-feed.ts'
 /** Session-cost namespace key domain for the locale seat. */
 export type CostLocale = PropsLocale<'cost-meter'>['t']
 
@@ -96,8 +97,7 @@ export const SessionCostLine = memo(function SessionCostLine({ useProjection, se
   const costCny = useProjection('sessionCost')
   const costUsd = useProjection('sessionCostUsd')
   const cost = currency === 'USD' ? costUsd : costCny
-  const [response, setResponse] = useState<ConversationCostResponse | null>(null)
-  const [failed, setFailed] = useState(false)
+  const { response, failed } = useCostFeed(sessionId, currency)
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLSpanElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -111,33 +111,6 @@ export const SessionCostLine = memo(function SessionCostLine({ useProjection, se
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [open])
-  useEffect(() => {
-    let alive = true
-    let timer: number | undefined
-    const endpoint = `${ENDPOINT}?session=${encodeURIComponent(sessionId)}&currency=${currency}`
-    const load = (): void => {
-      void fetch(endpoint, { cache: 'no-store' })
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          return res.json() as Promise<ConversationCostResponse>
-        })
-        .then((data) => {
-          if (!alive) return
-          setResponse(data)
-          setFailed(false)
-        })
-        .catch(() => {
-          if (alive) setFailed(true)
-        })
-    }
-    load()
-    timer = window.setInterval(load, REFRESH_MS)
-    return () => {
-      alive = false
-      if (timer !== undefined) window.clearInterval(timer)
-    }
-  }, [sessionId, currency])
-
   const balance = response?.balance
   const balanceEnabled = response?.pricebook?.balanceEnabled !== false
   // The dock line totals the WHOLE conversation: the main ledger plus every
@@ -164,11 +137,15 @@ export const SessionCostLine = memo(function SessionCostLine({ useProjection, se
   let balanceValue: string | null = null
   try {
     const okBalance = balance?.ok === true ? balance : null
+    // The feed keeps its last good payload across failed polls, so a transient
+    // failure shows the balance it already had rather than flipping to
+    // "unavailable" and staying there until the next success. Only a surface
+    // that has never received a payload reports the failure.
     const balanceText = !balanceEnabled
       ? null
       : okBalance !== null && okBalance.balance !== null
         ? t('balance.label', { amount: `${currencySymbol(okBalance.balance.currency)}${formatMoney(okBalance.balance.total)}` })
-        : failed ? t('balance.failed') : null
+        : failed && response === null ? t('balance.failed') : null
     if (balanceText !== null) balanceValue = balanceText
     label = (
       <>

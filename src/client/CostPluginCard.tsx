@@ -20,6 +20,7 @@ import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ConfigPageForm } from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type { ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ConversationCostResponse } from '../types.ts'
+import { publishCostFeed, useCostFeed } from './cost-feed.ts'
 import { formatTime } from './format.ts'
 import css from './CostPluginCard.module.css'
 
@@ -83,7 +84,9 @@ export const CostPluginCard = memo(function CostPluginCard({ view, form, t }: Co
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [staged, setStaged] = useState<Staged | null>(null)
-  const [response, setResponse] = useState<ConversationCostResponse | null>(null)
+  // The summary view only states what this page configures, so it asks for no
+  // route payload at all; the page view joins the shared pricebook feed.
+  const { response } = useCostFeed(view === 'page' ? undefined : null, 'CNY')
 
   const snapshot = form?.state as ConfigFormSnapshot<SectionShape> | undefined
   const value = snapshot?.value
@@ -105,25 +108,6 @@ export const CostPluginCard = memo(function CostPluginCard({ view, form, t }: Co
       openRouterEnabled: value.openRouterEnabled ?? true,
     })
   }, [value])
-
-  // Snapshot info for the row's one-liner (source/time, no version numbers).
-  useEffect(() => {
-    if (view !== 'page') return undefined
-    let alive = true
-    const load = (): void => {
-      void fetch('/cost-meter', { cache: 'no-store' })
-        .then(res => (res.ok ? res.json() as Promise<ConversationCostResponse> : null))
-        .then((data) => {
-          if (!alive || data === null) return
-          setResponse(data)
-        })
-        .catch(() => { /* keep the last snapshot info */ })
-    }
-    load()
-    return () => {
-      alive = false
-    }
-  }, [view])
 
   const current = response?.pricebook.current ?? null
   const source = current === null
@@ -196,7 +180,7 @@ export const CostPluginCard = memo(function CostPluginCard({ view, form, t }: Co
     })
       .then(res => (res.ok ? res.json() as Promise<ConversationCostResponse> : null))
       .then((data) => {
-        if (data !== null) setResponse(data)
+        if (data !== null) publishCostFeed(data, 'CNY')
         setStatus(t('settings.saved'))
       })
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))

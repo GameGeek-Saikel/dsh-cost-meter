@@ -30,8 +30,9 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ConversationCostResponse, SessionCostStep } from '../types.ts'
+import type { SessionCostStep } from '../types.ts'
 import { useAnchorStyle } from './anchor-name.ts'
+import { useCostFeed } from './cost-feed.ts'
 import { bandForTime, peakOffPeakMultiplier } from './cost-math.ts'
 import { currencySymbol, displayCurrency, formatMoney, formatMultiplier, formatTime } from './format.ts'
 import css from './AssistantCostChip.module.css'
@@ -68,26 +69,14 @@ export const AssistantCostChip = memo(function AssistantCostChip({ messageId, us
   const costUsd = useProjection('sessionCostUsd')
   const cost = currency === 'USD' ? costUsd : costCny
   const index = useProjection('sessionCostIndex')
-  const [response, setResponse] = useState<ConversationCostResponse | null>(null)
+  // Every completed reply draws one chip; a chip polls nothing of its own but
+  // joins the single session-less pricebook feed.
+  const { response } = useCostFeed(undefined, currency)
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLSpanElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const anchorStyle = useAnchorStyle()
   useDismissOnOutsidePointer(rootRef, open, setOpen, panelRef)
-
-  useEffect(() => {
-    let alive = true
-    void fetch(`/cost-meter?currency=${currency}`, { cache: 'no-store' })
-      .then(res => (res.ok ? res.json() as Promise<ConversationCostResponse> : null))
-      .then((data) => {
-        if (!alive || data === null) return
-        setResponse(data)
-      })
-      .catch(() => { /* the chip keeps the last good pricebook */ })
-    return () => {
-      alive = false
-    }
-  }, [currency])
 
   useEffect(() => {
     if (!open) return
